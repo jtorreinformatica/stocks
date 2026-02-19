@@ -1,0 +1,15 @@
+{
+    "assets": [
+        "GOOG",
+        "AAPL",
+        "BTC-USD",
+        "XAUUSD",
+        "SPY"
+    ],
+    "period": "1y",
+    "patterns_enabled": [
+        "Falling Wedge",
+        "VCP",
+        "Cup and Handle"
+    ]
+}

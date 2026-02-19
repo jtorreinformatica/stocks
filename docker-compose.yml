@@ -1,0 +1,13 @@
+services:
+  pattern-detector:
+    build: .
+    container_name: pattern-detector
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./config.json:/app/config.json
+    restart: unless-stopped
+
+networks:
+  default:
+    name: pattern-detector-network
