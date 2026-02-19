@@ -86,22 +86,29 @@ class VCPDetector(PatternDetector):
                 continue
 
             # Check that each contraction is smaller than the previous
+            # AND that the high of each contraction is near the pivot_high (resistance)
             ranges = [c["range_pct"] for c in contractions]
             if not all(ranges[i] > ranges[i + 1] for i in range(len(ranges) - 1)):
                 continue
 
-            # First contraction should be significant (> 10%)
-            if ranges[0] < 10:
+            # NEW: Check if contraction highs stay close to the resistance line
+            high_vals = [c["high_val"] for c in contractions]
+            ceiling_check = all(abs(hv - pivot_high) / pivot_high < 0.04 for hv in high_vals)
+            if not ceiling_check:
                 continue
 
-            # Last contraction should be tight (< half of first)
-            if ranges[-1] > ranges[0] * 0.6:
+            # First contraction should be significant (> 8%)
+            if ranges[0] < 8:
+                continue
+
+            # Last contraction should be tight (< 60% of first and < 5% total)
+            if ranges[-1] > ranges[0] * 0.6 or ranges[-1] > 6:
                 continue
 
             # Check that the lows are generally rising (higher lows)
             low_values = [c["low_val"] for c in contractions]
-            rising_lows = sum(1 for i in range(len(low_values) - 1) if low_values[i + 1] >= low_values[i] * 0.98)
-            if rising_lows < len(low_values) - 2:
+            rising_lows = sum(1 for i in range(len(low_values) - 1) if low_values[i + 1] >= low_values[i] * 0.99)
+            if rising_lows < len(low_values) - 1: # stricter check
                 continue
 
             start_idx = pivot_idx
