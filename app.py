@@ -140,38 +140,25 @@ with st.sidebar:
     st.markdown("---")
 
     # Asset management
-    st.markdown("### 📋 Activos")
-
-    # Add new asset
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        new_asset = st.text_input(
-            "Añadir ticker",
-            placeholder="Ej: AAPL, BTC-USD, TSLA",
-            label_visibility="collapsed",
-        )
-    with col2:
-        add_btn = st.button("➕", use_container_width=True)
-
-    if add_btn and new_asset:
-        ticker = new_asset.strip().upper()
-        if ticker not in config["assets"]:
-            config["assets"].append(ticker)
-            save_config(config)
-            st.rerun()
-        else:
-            st.warning(f"{ticker} ya está en la lista")
-
-    # Display current assets with remove buttons
-    for i, asset in enumerate(config["assets"]):
-        col_name, col_del = st.columns([4, 1])
-        with col_name:
-            st.markdown(f"**`{asset}`**")
-        with col_del:
-            if st.button("❌", key=f"del_{i}"):
-                config["assets"].pop(i)
-                save_config(config)
-                st.rerun()
+    st.markdown("### 📋 Listado de Activos")
+    
+    # Bulk input
+    current_assets_str = ", ".join(config.get("assets", []))
+    asset_input = st.text_area(
+        "Introduce los tickers separados por coma o espacios",
+        value=current_assets_str,
+        placeholder="Ej: AAPL, BTC-USD, MSFT, TSLA, NVDA...",
+        help="Introduce una lista larga de activos para escanear patrones.",
+        height=150
+    )
+    
+    # Process input
+    new_assets = [a.strip().upper() for a in asset_input.replace("\n", ",").split(",") if a.strip()]
+    if new_assets != config.get("assets"):
+        config["assets"] = new_assets
+        save_config(config)
+        # We don't rerun here immediately to let the user finish typing multiple assets if they use text_area, 
+        # but since Streamlit handles text_area updates on focus out/ctrl+enter, it's fine.
 
     st.markdown("---")
 
@@ -241,12 +228,18 @@ if not enabled_patterns:
 
 # Run analysis
 all_matches: dict[str, list] = {}
+high_confidence_symbols = []
 
-with st.spinner("📡 Descargando datos y analizando patrones..."):
-    for symbol in config["assets"]:
+# Filtering threshold
+CONFIDENCE_THRESHOLD = 0.7
+
+with st.spinner(f"📡 Escaneando {len(config['assets'])} activos..."):
+    progress_bar = st.progress(0)
+    for i, symbol in enumerate(config["assets"]):
         df = fetch_ohlcv(symbol, period=config.get("period", "1y"))
+        progress_bar.progress((i + 1) / len(config["assets"]))
+        
         if df.empty:
-            st.warning(f"⚠️ No se pudieron obtener datos para **{symbol}**")
             continue
 
         # Detect patterns
@@ -256,11 +249,21 @@ with st.spinner("📡 Descargando datos y analizando patrones..."):
             if detector:
                 try:
                     found = detector.detect(df)
-                    symbol_matches.extend(found)
+                    # Filter for high confidence and active today
+                    filtered_found = [
+                        m for m in found 
+                        if m.confidence >= CONFIDENCE_THRESHOLD and m.is_active_today
+                    ]
+                    symbol_matches.extend(filtered_found)
                 except Exception as e:
-                    st.error(f"Error detectando {pattern_name} en {symbol}: {e}")
+                    # Log error silently or show minimal warning
+                    pass
 
-        all_matches[symbol] = symbol_matches
+        if symbol_matches:
+            all_matches[symbol] = symbol_matches
+            high_confidence_symbols.append(symbol)
+    
+    progress_bar.empty()
 
 # ── Alerts ───────────────────────────────────────────────────────────────────
 
@@ -277,9 +280,17 @@ if alerts:
     # Visual notification
     st.toast(f"🚨 {len(alerts)} patrón(es) detectado(s) hoy!", icon="🔔")
 
+# ── Scanning Results ──────────────────────────────────────────────────────────
+
+if not high_confidence_symbols:
+    st.info("🔎 No se detectaron patrones de alta confianza hoy en la lista proporcionada.")
+    st.stop()
+
+st.success(f"🎯 Se han detectado **{len(high_confidence_symbols)}** activos con patrones de alta confianza para revisar hoy.")
+
 # ── Charts ───────────────────────────────────────────────────────────────────
 
-for symbol in config["assets"]:
+for symbol in high_confidence_symbols:
     df = fetch_ohlcv(symbol, period=config.get("period", "1y"))
     if df.empty:
         continue
@@ -297,11 +308,10 @@ for symbol in config["assets"]:
             f"### {symbol} — ${price:.2f} {change_icon} {change:+.2f}%"
         )
     with col_stats:
-        badge_class = "status-ok" if matches else "status-warn"
-        badge_text = f"📐 {len(matches)} patrón(es)" if matches else "— Sin patrones"
+        badge_text = f"🔥 {len(matches)} patrón(es) de ALTA CONFIANZA"
         st.markdown(
             f"<div style='text-align:right; padding-top:12px;'>"
-            f"<span class='status-badge {badge_class}'>"
+            f"<span class='status-badge status-ok' style='background: rgba(187,134,252,0.2); color: #bb86fc;'>"
             f"{badge_text}"
             f"</span></div>",
             unsafe_allow_html=True,
@@ -312,28 +322,21 @@ for symbol in config["assets"]:
     st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}")
 
     # Pattern details
-    if matches:
-        with st.expander(f"📋 Detalles de patrones en {symbol}", expanded=False):
-            for m in matches:
-                conf_class = (
-                    "confidence-high" if m.confidence >= 0.7
-                    else "confidence-mid" if m.confidence >= 0.5
-                    else "confidence-low"
-                )
-                is_today = "🔔 HOY" if m.is_active_today else ""
-                st.markdown(
-                    f"""<div class="pattern-card">
-                        <div class="pattern-name">{m.pattern_name} {is_today}</div>
-                        <div class="pattern-detail">
-                            📅 {m.start_date.strftime('%d/%m/%Y')} → {m.end_date.strftime('%d/%m/%Y')}
-                            &nbsp;·&nbsp;
-                            Confianza: <span class="{conf_class}">{m.confidence:.0%}</span>
-                            &nbsp;·&nbsp;
-                            {m.description}
-                        </div>
-                    </div>""",
-                    unsafe_allow_html=True,
-                )
+    with st.expander(f"📋 Detalles de patrones en {symbol}", expanded=True):
+        for m in matches:
+            st.markdown(
+                f"""<div class="pattern-card">
+                    <div class="pattern-name">{m.pattern_name} 🔔 HOY</div>
+                    <div class="pattern-detail">
+                        📅 {m.start_date.strftime('%d/%m/%Y')} → {m.end_date.strftime('%d/%m/%Y')}
+                        &nbsp;·&nbsp;
+                        Confianza: <span class="confidence-high">{m.confidence:.0%}</span>
+                        &nbsp;·&nbsp;
+                        {m.description}
+                    </div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
 
