@@ -30,6 +30,9 @@ st.markdown("""
     .stApp {
         background-color: #0e1117;
     }
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
 
     /* Alert banner */
     .alert-banner {
