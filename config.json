@@ -222,11 +222,10 @@
         "LRCX",
         "BP"
     ],
-    "period": "1y",
+    "period": "5y",
     "patterns_enabled": [
         "VCP",
-        "Cup and Handle",
-        "Triángulo Ascendente"
+        "Cup and Handle"
     ],
     "interval": "1mo"
 }

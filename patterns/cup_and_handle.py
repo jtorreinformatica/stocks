@@ -29,7 +29,10 @@ class CupAndHandleDetector(PatternDetector):
         )
 
     def detect(self, df: pd.DataFrame) -> list[PatternMatch]:
-        if len(df) < 40:
+        # Adaptive minimum length
+        is_daily = len(df) > 100 or (df.index[1] - df.index[0]).days == 1
+        min_len = 40 if is_daily else 15
+        if len(df) < min_len:
             return []
 
         matches = []
@@ -38,8 +41,8 @@ class CupAndHandleDetector(PatternDetector):
         closes = df["Close"].values
         dates = df.index
 
-        # Find prominent local maxima (potential rim levels)
-        order = 8
+        # Adaptive peak-finding order
+        order = max(2, len(df) // 20)
         local_max_idx = argrelextrema(highs, np.greater_equal, order=order)[0]
         local_min_idx = argrelextrema(lows, np.less_equal, order=order)[0]
 
@@ -57,8 +60,10 @@ class CupAndHandleDetector(PatternDetector):
 
                 cup_width = right_rim_idx - left_rim_idx
 
-                # Cup should be between 20 and 150 bars
-                if cup_width < 20 or cup_width > 150:
+                # Adaptive width: cup should be between 10% and 80% of data
+                min_w = 20 if is_daily else 5
+                max_w = 150 if is_daily else len(df) * 0.8
+                if cup_width < min_w or cup_width > max_w:
                     continue
 
                 # Rim levels should be roughly equal (within 8%)

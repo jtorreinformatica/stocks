@@ -120,6 +120,7 @@ st.markdown("""
 # ── Config ───────────────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
+USERS_PATH = Path(__file__).parent / "users.json"
 
 
 def load_config() -> dict:
@@ -134,7 +135,50 @@ def save_config(config: dict):
         json.dump(config, f, indent=4, ensure_ascii=False)
 
 
+def load_users() -> dict:
+    if USERS_PATH.exists():
+        with open(USERS_PATH, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except Exception:
+                return {}
+    return {"admin": "password123"}
+
+
 config = load_config()
+
+# ── Authentication ─────────────────────────────────────────────────────────────
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = None
+
+with st.sidebar:
+    st.markdown("## 🔐 Acceso")
+    if not st.session_state.authenticated:
+        users = load_users()
+        with st.form("login_form"):
+            user_input = st.text_input("Usuario")
+            pass_input = st.text_input("Contraseña", type="password")
+            login_submitted = st.form_submit_button("Iniciar Sesión", use_container_width=True)
+            
+            if login_submitted:
+                if user_input in users and users[user_input] == pass_input:
+                    st.session_state.authenticated = True
+                    st.session_state.username = user_input
+                    st.success(f"¡Bienvenido, {user_input}!")
+                    st.rerun()
+                else:
+                    st.error("Credenciales incorrectas")
+    else:
+        st.write(f"Conectado como **{st.session_state.username}**")
+        if st.button("Cerrar Sesión", use_container_width=True):
+            st.session_state.authenticated = False
+            st.session_state.username = None
+            st.rerun()
+
+    st.markdown("---")
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 
@@ -265,13 +309,24 @@ high_confidence_symbols = []
 # Filtering threshold
 CONFIDENCE_THRESHOLD = 0.7
 
+# Automatic period adjustment for scanner
+current_period = config.get("period", "1y")
+scan_interval = config.get("interval", "1d")
+
+if scan_interval == "1wk" and current_period in ["3mo", "6mo", "1y"]:
+    scan_period = "2y"
+elif scan_interval == "1mo" and current_period in ["3mo", "6mo", "1y", "2y"]:
+    scan_period = "10y"
+else:
+    scan_period = current_period
+
 with st.spinner(f"📡 Escaneando {len(config['assets'])} activos..."):
     progress_bar = st.progress(0)
     for i, symbol in enumerate(config["assets"]):
         df = fetch_ohlcv(
             symbol, 
-            period=config.get("period", "1y"), 
-            interval=config.get("interval", "1d")
+            period=scan_period, 
+            interval=scan_interval
         )
         progress_bar.progress((i + 1) / len(config["assets"]))
         
@@ -288,7 +343,7 @@ with st.spinner(f"📡 Escaneando {len(config['assets'])} activos..."):
                     # Filter for high confidence and active today
                     filtered_found = [
                         m for m in found 
-                        if m.confidence >= CONFIDENCE_THRESHOLD and m.is_active_today
+                        if m.confidence >= CONFIDENCE_THRESHOLD and m.is_active_today(interval=scan_interval)
                     ]
                     symbol_matches.extend(filtered_found)
                 except Exception as e:
@@ -306,15 +361,33 @@ with st.spinner(f"📡 Escaneando {len(config['assets'])} activos..."):
 today_matches = filter_today_patterns(all_matches)
 alerts = get_alert_summary(today_matches)
 
+# Limit for guests
+IS_GUEST = not st.session_state.authenticated
+if IS_GUEST:
+    high_confidence_symbols = high_confidence_symbols[:3]
+    if alerts:
+        alerts = alerts[:3]
+
 if alerts:
-    alert_html = "<div class='alert-banner'><h3>🔔 Alertas de Hoy</h3>"
+    alert_html = "<div class='alert-banner'><h3>🔔 Alertas de Hoy"
+    if IS_GUEST and len(today_matches) > 3:
+         alert_html += " (Vista Limitada)"
+    alert_html += "</h3>"
+    
     for alert in alerts:
         alert_html += f"<div>{alert}</div>"
+    
+    if IS_GUEST and len(today_matches) > 3:
+        alert_html += f"<div style='margin-top:10px; font-style:italic; color:#ffab40;'>... y {len(today_matches) - 3} patrones más. Inicia sesión para ver el listado completo.</div>"
+        
     alert_html += "</div>"
     st.markdown(alert_html, unsafe_allow_html=True)
 
     # Visual notification
     st.toast(f"🚨 {len(alerts)} patrón(es) detectado(s) hoy!", icon="🔔")
+
+if IS_GUEST and len(high_confidence_symbols) >= 3:
+    st.info("💡 **Vista de Invitado**: Se muestran los primeros 3 activos detectados. Inicia sesión en la barra lateral para ver todos los resultados.")
 
 # ── Scanning Results ──────────────────────────────────────────────────────────
 
@@ -327,10 +400,11 @@ st.success(f"🎯 Se han detectado **{len(high_confidence_symbols)}** activos co
 # ── Charts ───────────────────────────────────────────────────────────────────
 
 for symbol in high_confidence_symbols:
+    # Use the same scan_period used for analysis to ensure consistency
     df = fetch_ohlcv(
         symbol, 
-        period=config.get("period", "1y"), 
-        interval=config.get("interval", "1d")
+        period=scan_period, 
+        interval=scan_interval
     )
     if df.empty:
         continue

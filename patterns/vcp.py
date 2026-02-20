@@ -29,7 +29,11 @@ class VCPDetector(PatternDetector):
         )
 
     def detect(self, df: pd.DataFrame) -> list[PatternMatch]:
-        if len(df) < 60:
+        # Adaptive minimum length: at least 60 for daily, 24 for weekly/monthly
+        is_daily = len(df) > 100 or (df.index[1] - df.index[0]).days == 1
+        min_len = 60 if is_daily else 24
+        
+        if len(df) < min_len:
             return []
 
         matches = []
@@ -39,12 +43,12 @@ class VCPDetector(PatternDetector):
         volumes = df["Volume"].values
         dates = df.index
 
-        # Find local maxima and minima with a moderate order
-        order = 7
+        # Adaptive peak-finding order
+        order = max(2, len(df) // 20)
         local_max_idx = argrelextrema(highs, np.greater_equal, order=order)[0]
         local_min_idx = argrelextrema(lows, np.less_equal, order=order)[0]
 
-        if len(local_max_idx) < 3 or len(local_min_idx) < 3:
+        if len(local_max_idx) < 2 or len(local_min_idx) < 2:
             return []
 
         # Look for the initial high (pivot high) followed by contractions
@@ -82,33 +86,29 @@ class VCPDetector(PatternDetector):
 
                 search_start = next_high_idx
 
-            if len(contractions) < 2:
+            # Require at least 2 contractions (or just 1 if monthly)
+            min_contractions = 2 if is_daily else 1
+            if len(contractions) < min_contractions:
                 continue
 
             # Check that each contraction is smaller than the previous
-            # AND that the high of each contraction is near the pivot_high (resistance)
             ranges = [c["range_pct"] for c in contractions]
-            if not all(ranges[i] > ranges[i + 1] for i in range(len(ranges) - 1)):
+            if len(ranges) > 1 and not all(ranges[i] > ranges[i + 1] for i in range(len(ranges) - 1)):
                 continue
 
-            # NEW: Check if contraction highs stay close to the resistance line
+            # Check if contraction highs stay close to the resistance line
             high_vals = [c["high_val"] for c in contractions]
-            ceiling_check = all(abs(hv - pivot_high) / pivot_high < 0.04 for hv in high_vals)
+            ceiling_check = all(abs(hv - pivot_high) / pivot_high < 0.08 for hv in high_vals)
             if not ceiling_check:
                 continue
 
-            # First contraction should be significant (> 8%)
-            if ranges[0] < 8:
-                continue
-
-            # Last contraction should be tight (< 60% of first and < 5% total)
-            if ranges[-1] > ranges[0] * 0.6 or ranges[-1] > 6:
-                continue
-
-            # Check that the lows are generally rising (higher lows)
-            low_values = [c["low_val"] for c in contractions]
-            rising_lows = sum(1 for i in range(len(low_values) - 1) if low_values[i + 1] >= low_values[i] * 0.99)
-            if rising_lows < len(low_values) - 1: # stricter check
+            # Last contraction should be tight
+            if len(ranges) > 1:
+                tightness_check = ranges[-1] <= ranges[0] * 0.8 or ranges[-1] < 10
+            else:
+                tightness_check = ranges[0] < 15
+            
+            if not tightness_check:
                 continue
 
             start_idx = pivot_idx
@@ -126,7 +126,10 @@ class VCPDetector(PatternDetector):
             confidence = 0.4
             confidence += 0.15 * min(len(contractions), 4) / 4  # More contractions = better
             confidence += 0.15 if vol_contracting else 0
-            confidence += 0.1 * (1 - ranges[-1] / ranges[0])  # Tighter last contraction = better
+            if len(ranges) > 1:
+                confidence += 0.1 * (1 - ranges[-1] / ranges[0])  # Tighter last contraction = better
+            else:
+                confidence += 0.05
             confidence = min(0.95, confidence)
 
             # Annotations: draw the contraction ranges

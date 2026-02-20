@@ -36,11 +36,17 @@ class PatternMatch:
     description: str = ""
     annotations: list[PatternAnnotation] = field(default_factory=list)
 
-    @property
-    def is_active_today(self) -> bool:
-        """Check if this pattern ends on the most recent trading day."""
+    def is_active_today(self, interval: str = "1d") -> bool:
+        """Check if this pattern ends near the most recent trading day."""
         today = pd.Timestamp.now().normalize()
-        return self.end_date.normalize() >= today - pd.Timedelta(days=3)
+        # Lookback depends on interval
+        days_lookback = 3
+        if interval == "1wk":
+            days_lookback = 9  # A bit more than a week
+        elif interval == "1mo":
+            days_lookback = 32 # A bit more than a month
+            
+        return self.end_date.normalize() >= today - pd.Timedelta(days=days_lookback)
 
 
 class PatternDetector(ABC):
