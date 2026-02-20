@@ -14,13 +14,14 @@ except ImportError:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_ohlcv(symbol: str, period: str = "1y") -> pd.DataFrame:
+def fetch_ohlcv(symbol: str, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
     """
-    Fetch daily OHLCV data for a given symbol.
+    Fetch OHLCV data for a given symbol.
 
     Args:
         symbol: Ticker symbol (e.g. 'AAPL', 'BTC-USD').
         period: Data period (e.g. '6mo', '1y', '2y').
+        interval: Data interval (e.g. '1d', '1wk', '1mo').
 
     Returns:
         DataFrame with columns: Open, High, Low, Close, Volume
@@ -30,7 +31,7 @@ def fetch_ohlcv(symbol: str, period: str = "1y") -> pd.DataFrame:
 
     # Primary: yf.download() — most reliable in yfinance >= 1.x
     try:
-        df = yf.download(symbol, period=period, interval="1d", progress=False, auto_adjust=True)
+        df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
         # yf.download may return multi-level columns for single ticker
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
@@ -41,14 +42,14 @@ def fetch_ohlcv(symbol: str, period: str = "1y") -> pd.DataFrame:
     if df is None or df.empty:
         try:
             ticker = yf.Ticker(symbol)
-            df = ticker.history(period=period, interval="1d")
+            df = ticker.history(period=period, interval=interval)
         except Exception:
             pass
 
     # Fallback 2: pandas_ta
     if (df is None or df.empty) and HAS_PANDAS_TA:
         try:
-            df = pd.DataFrame().ta.ticker(symbol, period=period, interval="1d")
+            df = pd.DataFrame().ta.ticker(symbol, period=period, interval=interval)
         except Exception:
             pass
 

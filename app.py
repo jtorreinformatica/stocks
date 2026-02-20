@@ -179,13 +179,42 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # Timeframe selector
+    st.markdown("### ⏱️ Timeframe")
+    timeframe_map = {
+        "1 Día (1D)": "1d",
+        "1 Semana (1W)": "1wk",
+        "1 Mes (1M)": "1mo"
+    }
+    timeframe_label = st.selectbox(
+        "Timeframe de búsqueda",
+        options=list(timeframe_map.keys()),
+        index=list(timeframe_map.values()).index(config.get("interval", "1d")),
+        label_visibility="collapsed",
+    )
+    interval = timeframe_map[timeframe_label]
+    if interval != config.get("interval"):
+        config["interval"] = interval
+        save_config(config)
+
+    st.markdown("---")
+
     # Pattern selector
     st.markdown("### 🔍 Patrones")
     all_pattern_names = get_all_detector_names()
+    
+    # Default patterns: VCP and Cup and Handle
+    default_patterns = ["VCP", "Cup and Handle"]
+    current_defaults = config.get("patterns_enabled")
+    if current_defaults is None:
+        current_defaults = [p for p in default_patterns if p in all_pattern_names]
+    else:
+        current_defaults = [p for p in current_defaults if p in all_pattern_names]
+
     enabled_patterns = st.multiselect(
         "Patrones activos",
         options=all_pattern_names,
-        default=[p for p in config.get("patterns_enabled", all_pattern_names) if p in all_pattern_names],
+        default=current_defaults,
         label_visibility="collapsed",
     )
     config["patterns_enabled"] = enabled_patterns
@@ -239,7 +268,11 @@ CONFIDENCE_THRESHOLD = 0.7
 with st.spinner(f"📡 Escaneando {len(config['assets'])} activos..."):
     progress_bar = st.progress(0)
     for i, symbol in enumerate(config["assets"]):
-        df = fetch_ohlcv(symbol, period=config.get("period", "1y"))
+        df = fetch_ohlcv(
+            symbol, 
+            period=config.get("period", "1y"), 
+            interval=config.get("interval", "1d")
+        )
         progress_bar.progress((i + 1) / len(config["assets"]))
         
         if df.empty:
@@ -294,7 +327,11 @@ st.success(f"🎯 Se han detectado **{len(high_confidence_symbols)}** activos co
 # ── Charts ───────────────────────────────────────────────────────────────────
 
 for symbol in high_confidence_symbols:
-    df = fetch_ohlcv(symbol, period=config.get("period", "1y"))
+    df = fetch_ohlcv(
+        symbol, 
+        period=config.get("period", "1y"), 
+        interval=config.get("interval", "1d")
+    )
     if df.empty:
         continue
 

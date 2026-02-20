@@ -224,8 +224,9 @@
     ],
     "period": "1y",
     "patterns_enabled": [
-        "Falling Wedge",
         "VCP",
-        "Cup and Handle"
-    ]
+        "Cup and Handle",
+        "Triángulo Ascendente"
+    ],
+    "interval": "1mo"
 }
